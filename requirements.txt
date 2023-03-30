@@ -1,0 +1,10 @@
+storpool == 5.5.0
+protobuf == 3.17.3
+googleapis-common-protos == 1.53.0
+grpcio == 1.38.0
+grpcio-status == 1.38.0
+grpcio-tools == 1.38.0
+grpc-interceptor == 0.13.0
+uuid~=1.30
+six~=1.16.0
+simplejson == 3.17.2

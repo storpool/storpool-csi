@@ -1,0 +1,4 @@
+#!/bin/bash
+
+ssh root@10.2.14.13 "rm -rf $1"
+echo $1
