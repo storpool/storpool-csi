@@ -3,7 +3,6 @@ Implement the ControllerService of the CSI spec
 """
 import logging
 import re
-import uuid
 
 from pathlib import Path
 from urllib.parse import urlparse
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 from storpool import spapi, sptypes
 from grpc_interceptor.exceptions import (
     NotFound,
+    Internal,
     InvalidArgument,
     AlreadyExists,
     FailedPrecondition,
@@ -84,43 +84,32 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         if request.parameters["template"] is None:
             raise InvalidArgument("Missing volume template name")
 
-        volume_template = None
-
-        for template in self._sp_api.volumeTemplatesStatus():
-            if template.name == request.parameters["template"]:
-                volume_template = template
+        volume_size = self._determine_volume_size(request.capacity_range)
 
         logger.info(
-            """Provisioning volume %s using template %s""",
-            request.name,
-            volume_template.name,
+            f"Provisioning volume {request.name} (template: {request.parameters['template']}, size: {volume_size})",
         )
 
-        for volume in self._sp_api.volumesList():
-            if volume.tags.get("csi_name") == request.name:
-                if volume.size != self._determine_volume_size(
-                    request.capacity_range, volume_template.stored.free
-                ):
+        try:
+            volume_create_result = self._sp_api.volumeCreate(
+                {
+                    "template": request.parameters["template"],
+                    "size": volume_size,
+                    "tags": {"csi_name": request.name},
+                }
+            )
 
-                    raise AlreadyExists(
-                        f"There's already a volume with name: {request.name}"
-                    )
-                return self._construct_volume_create_response(volume)
-
-        volume_id = uuid.uuid4()
-        self._sp_api.volumeCreate(
-            {
-                "name": volume_id,
-                "template": request.parameters["template"],
-                "size": self._determine_volume_size(
-                    request.capacity_range, volume_template.stored.free
-                ),
-                "tags": {"csi_name": request.name},
-            }
-        )
-        return self._construct_volume_create_response(
-            self._sp_api.volumeInfo(volume_id)
-        )
+            return self._construct_volume_create_response(
+                self._sp_api.volumeInfo(volume_create_result.globalId)
+            )
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "insufficientResources":
+                raise OutOfRange(error.desc)
+            elif error.name == "objectDoesNotExist":
+                raise InvalidArgument(error.desc)
+            else:
+                raise Internal(error.desc)
 
     def DeleteVolume(self, request, context):
         if not request.volume_id:
@@ -351,34 +340,15 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         response = csi_pb2.CreateVolumeResponse()
 
         if volume_info is not None:
-            response.volume.volume_id = volume_info.name
+            response.volume.volume_id = volume_info.globalId
             response.volume.capacity_bytes = volume_info.size
 
         return response
 
     @staticmethod
-    def _determine_volume_size(capacity_range, template_free_space):
-        volume_size = constant.DEFAULT_VOLUME_SIZE
-
-        if capacity_range.required_bytes != capacity_range.limit_bytes:
-            if (
-                capacity_range.required_bytes == 0
-                and capacity_range.limit_bytes > 0
-            ):
-                if capacity_range.limit_bytes >= template_free_space:
-                    volume_size = template_free_space
-            elif (
-                capacity_range.required_bytes > 0
-                and capacity_range.limit_bytes == 0
-            ):
-                if capacity_range.required_bytes > template_free_space:
-                    raise OutOfRange("Not enough free space in template")
-
-                volume_size = capacity_range.required_bytes
+    def _determine_volume_size(capacity_range):
+        if capacity_range.required_bytes > 0 and capacity_range.limit_bytes > 0:
+            return max(capacity_range.required_bytes, capacity_range.limit_bytes)
         else:
-            if capacity_range.required_bytes > template_free_space:
-                raise OutOfRange("Not enough free space in template")
+            return constant.DEFAULT_VOLUME_SIZE
 
-            volume_size = capacity_range.required_bytes
-
-        return volume_size
