@@ -7,12 +7,11 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-from storpool import spapi, sptypes
+from storpool import spapi
 from grpc_interceptor.exceptions import (
     NotFound,
     Internal,
     InvalidArgument,
-    AlreadyExists,
     FailedPrecondition,
     ResourceExhausted,
     OutOfRange,
@@ -207,13 +206,12 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
 
         sp_node_id = utils.csi_node_id_to_sp_node_id(request.node_id)
 
-        volume_reassign = {"volume": request.volume_id}
+        volume_reassign = {
+            "volume": request.volume_id,
+            "rw": [sp_node_id],
+            "detach": "all"
+        }
 
-        if request.readonly:
-            volume_reassign["ro"] = [sp_node_id]
-        else:
-            volume_reassign["detach"] = "all"
-            volume_reassign["rw"] = [sp_node_id]
         try:
             self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
         except spapi.ApiError as error:
