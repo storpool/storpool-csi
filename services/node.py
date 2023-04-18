@@ -120,7 +120,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
         self._config = spconfig.SPConfig(os.environ.get("SP_NODE_NAME", None))
         self._sp_api = spapi.Api.fromConfig()
         self._node_id = (
-            str(self._config["SP_CLUSTER_NAME"]).lower()
+            str(self._config["SP_CLUSTER_ID"]).lower()
             + "."
             + str(self._config["SP_OURID"])
         )
