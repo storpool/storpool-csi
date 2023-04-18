@@ -28,14 +28,14 @@ def volume_is_attached(volume_name: str) -> bool:
     """
     Checks whether a StorPool volume is attached to the current node
     """
-    return Path("/dev/storpool/" + volume_name).exists()
+    return Path("/dev/storpool-byid/" + volume_name).exists()
 
 
 def volume_get_real_path(volume_name: str) -> str:
     """
     Returns the "/dev/sp-X" device which represents the volume_name
     """
-    return str(Path("/dev/storpool/" + volume_name).readlink())
+    return str(Path("/dev/storpool-byid/" + volume_name).readlink())
 
 
 def volume_is_formatted(volume_name: str) -> bool:
@@ -149,13 +149,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
         if not request.staging_target_path:
             raise InvalidArgument("Missing staging path.")
 
-        if not self._volume_exists(request.volume_id):
-            logger.error("Volume %s doesn't exist.", {request.volume_id})
-            raise NotFound(
-                f"StorPool volume {request.volume_id} doesn't exist."
-            )
-
-        if not self._volume_is_attached_here(request.volume_id):
+        if not volume_is_attached(request.volume_id):
             logger.error(
                 "Volume %s is not attached to %s.",
                 request.volume_id,
@@ -211,7 +205,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                     format_command = subprocess.run(
                         [
                             "mkfs." + volume_requested_fs,
-                            "/dev/storpool/" + request.volume_id,
+                            "/dev/storpool-byid/" + request.volume_id,
                         ],
                         stdout=subprocess.DEVNULL,
                         encoding="utf-8",
@@ -307,11 +301,6 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
 
         if not request.staging_target_path:
             raise InvalidArgument("Missing stating target path")
-
-        if not self._volume_exists(request.volume_id):
-            raise NotFound(
-                f"StorPool volume {request.volume_id} doesn't exist"
-            )
 
         if not volume_is_attached(request.volume_id):
             raise NotFound(
@@ -475,15 +464,3 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                 )
 
         return csi_pb2.NodeUnpublishVolumeResponse()
-
-    def _volume_is_attached_here(self, volume_name):
-        return volume_name in [
-            attachment.volume
-            for attachment in self._sp_api.attachmentsList()
-            if attachment.client == int(self._config["SP_OURID"])
-        ]
-
-    def _volume_exists(self, volume_name):
-        return volume_name in [
-            volume.name for volume in self._sp_api.volumesList()
-        ]
