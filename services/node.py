@@ -445,7 +445,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                 request.target_path,
             )
             remove_target_path_command = subprocess.run(
-                ["rm", "-rf", request.target_path],
+                ["rmdir", request.target_path],
                 encoding="utf-8",
                 capture_output=False,
                 check=False,
