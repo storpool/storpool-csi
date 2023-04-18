@@ -28,7 +28,7 @@ def volume_is_attached(volume_name: str) -> bool:
     """
     Checks whether a StorPool volume is attached to the current node
     """
-    return Path("/dev/storpool-byid/" + volume_name).exists()
+    return Path("/dev/storpool-byid/" + volume_name).is_block_device()
 
 
 def volume_get_real_path(volume_name: str) -> str:
