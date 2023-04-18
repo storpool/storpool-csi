@@ -247,32 +247,34 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         if not request.volume_id:
             raise InvalidArgument("Missing volume Id")
 
-        logger.info("Unpublishing volume %s", request.volume_id)
+        logger.info(f"Unpublishing volume {request.volume_id}")
 
-        if request.volume_id in [
-            attachment.volume for attachment in self._sp_api.attachmentsList()
-        ]:
-            volume_reassign = {"volume": request.volume_id}
+        volume_reassign = {"volume": request.volume_id}
 
-            if request.node_id:
-                volume_reassign["detach"] = [
-                    utils.csi_node_id_to_sp_node_id(request.node_id)
-                ]
-                logger.debug(
-                    "Detaching volume %s from node %s",
-                    request.volume_id,
-                    request.node_id,
-                )
-            else:
-                volume_reassign["detach"] = "all"
-                logger.debug(
-                    "Detaching volume %s from all nodes", request.volume_id
-                )
-
-            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
-
+        if request.node_id:
+            volume_reassign["detach"] = [
+                utils.csi_node_id_to_sp_node_id(request.node_id)
+            ]
+            logger.debug(
+                "Detaching volume %s from node %s",
+                request.volume_id,
+                request.node_id,
+            )
         else:
-            logger.error("Volume %s isn't attached", request.volume_id)
+            volume_reassign["detach"] = "all"
+            logger.debug(
+                "Detaching volume %s from all nodes", request.volume_id
+            )
+        try:
+            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "objectDoesNotExist":
+                error_message = f"StorPool volume {request.volume_id} does not exist"
+                logger.error(error_message)
+                raise NotFound(error_message)
+            else:
+                raise Internal(error.desc)
 
         return csi_pb2.ControllerUnpublishVolumeResponse()
 
