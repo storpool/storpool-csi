@@ -197,15 +197,6 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             request.readonly,
         )
 
-        if request.volume_id not in [
-            volume.name for volume in self._sp_api.volumesList()
-        ]:
-            logger.error(
-                "Tried publishing volume %s but it doesn't exist.",
-                request.volume_id,
-            )
-            raise NotFound(f"StorPool volume {request.volume_id} not found.")
-
         if not re.match(constant.CSI_NODE_ID_REGEX, request.node_id):
             logger.error(
                 "Tried publishing to invalid node id: %s", request.node_id
@@ -216,78 +207,37 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
 
         sp_node_id = utils.csi_node_id_to_sp_node_id(request.node_id)
 
-        if sp_node_id not in self._sp_api.servicesList().clients.keys():
-            logger.error(
-                "Tried publishing to node %s but it doesn't have a block service running.",
-                request.node_id,
-            )
-            raise NotFound(
-                f"StorPool node {request.node_id} doesn't have a block service running."
-            )
+        volume_reassign = {"volume": request.volume_id}
 
-        if request.volume_id in [
-            attachment.volume
-            for attachment in self._sp_api.attachmentsList()
-            if attachment.client != sp_node_id
-        ]:
-            logger.error(
-                "Volume %s is already attached to another node.",
-                request.volume_id,
-            )
-            raise FailedPrecondition(
-                f"""StorPool volume {request.volume_id} is already attach to another node."""
-            )
-
-        node_attachments = [
-            attachment
-            for attachment in self._sp_api.attachmentsList()
-            if attachment.client == sp_node_id
-        ]
-
-        if request.volume_id in [
-            attachment.volume for attachment in node_attachments
-        ]:
-            attachment = self._get_attachment_for_volume(request.volume_id)
-            if (attachment.rights == "rw" and request.readonly) or (
-                attachment.rights == "ro" and not request.readonly
-            ):
-                logger.error(
-                    """Tried to attach volume %s to node %s as readonly: %r but it's
-                     already attached as %s""",
-                    request.volume_id,
-                    request.node_id,
-                    request.readonly,
-                    attachment.rights,
-                )
-                raise AlreadyExists(
-                    f"""StorPool volume {request.volume_id} attached as {attachment.rights}
-                     but published as readonly: {request.readonly}"""
-                )
-
+        if request.readonly:
+            volume_reassign["ro"] = [sp_node_id]
         else:
-            if len(node_attachments) == sptypes.MAX_CLIENT_DISKS:
-                logger.error(
-                    "No more volumes can be attached to node %s",
-                    request.node_id,
-                )
-                raise ResourceExhausted(
-                    f"No more volumes can be attached to node {request.node_id}"
-                )
-
-            volume_reassign = {"volume": request.volume_id}
-
-            if request.readonly:
-                volume_reassign["ro"] = [sp_node_id]
-            else:
-                volume_reassign["rw"] = [sp_node_id]
-
-            logger.debug(
-                "Trying to attach volume %s to node %s as readonly: %r",
-                request.volume_id,
-                request.node_id,
-                request.readonly,
-            )
+            volume_reassign["detach"] = "all"
+            volume_reassign["rw"] = [sp_node_id]
+        try:
             self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "objectDoesNotExist":
+                logger.error(
+                    f"Tried publishing volume {request.volume_id} but it doesn't exist."
+                )
+                raise NotFound(f"StorPool volume {request.volume_id} not found.")
+            elif error.name == "invalidParam":
+                if error.desc == "No such client registered":
+                    error_message = f"StorPool node {request.node_id} doesn't have a block service running."
+                    logger.error(error_message)
+                    raise NotFound(error_message)
+                else:
+                    error_message = f"No more volumes can be attached to node {request.node_id}"
+                    logger.error(error_message)
+                    raise ResourceExhausted(error_message)
+            elif error.name == "busy":
+                error_message = f"StorPool volume {request.volume_id} is already attach to another node."
+                logger.error(error_message)
+                raise FailedPrecondition(error_message)
+            else:
+                raise Internal(error.desc)
 
         return csi_pb2.ControllerPublishVolumeResponse(
             publish_context={"readonly": str(request.readonly)}
