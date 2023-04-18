@@ -118,25 +118,20 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         if not request.volume_id:
             raise InvalidArgument("Missing volume name")
 
-        for attachment in self._sp_api.attachmentsList():
-            if attachment.volume == request.volume_id:
-                raise FailedPrecondition(
-                    f"""StorPool volume {request.volume_id} is still
-                    attached to {attachment.client}"""
-                )
+        logger.info(f"Deleting volume {request.volume_id}")
 
-        logger.info("Deleting volume %s", request.volume_id)
-
-        if request.volume_id in [
-            volume.name for volume in self._sp_api.volumesList()
-        ]:
+        try:
             self._sp_api.volumeDelete(request.volume_id)
-            logger.debug("Successfully deleted volume %s", request.volume_id)
-        else:
-            logger.error(
-                "Tried to delete volume %s that does not exist",
-                request.volume_id,
-            )
+            logger.debug(f"Successfully deleted volume {request.volume_id}")
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "objectDoesNotExist":
+                logger.debug(f"Tried to delete an non-existing volume: {request.volume_id}")
+            elif error.name == "busy":
+                logger.error(f"Tried to delete an attached volume: {request.volume_id}")
+                raise FailedPrecondition(error.desc)
+            else:
+                raise Internal(error.desc)
 
         return csi_pb2.DeleteVolumeResponse()
 
@@ -149,16 +144,16 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         if not request.volume_capabilities:
             raise InvalidArgument("Missing volume capabilities")
 
-        if request.volume_id not in [
-            volume.name for volume in self._sp_api.volumesList()
-        ]:
-            logger.error(
-                """Cannot validate volume %s because it doesn't exist.""",
-                request.volume_id,
-            )
-            raise NotFound(
-                f"StorPool volume {request.volume_id} does not exist."
-            )
+        try:
+            self._sp_api.volumeInfo(request.volume_id)
+        except spapi.ApiError as error:
+            if error.name == "objectDoesNotExist":
+                logger.error(
+                    f"Cannot validate volume {request.volume_id} because it doesn't exist."
+                )
+                raise NotFound(
+                    f"StorPool volume {request.volume_id} does not exist."
+                )
 
         if hasattr(request.parameters, "template"):
             response.confirmed.parameters["template"] = request.parameters[
