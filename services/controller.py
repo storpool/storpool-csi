@@ -99,9 +99,12 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 }
             )
 
-            return self._construct_volume_create_response(
-                self._sp_api.volumeInfo(volume_create_result.globalId)
-            )
+            response = csi_pb2.CreateVolumeResponse()
+
+            response.volume.volume_id = str(volume_create_result.globalId)
+            response.volume.capacity_bytes = volume_size
+
+            return response
         except spapi.ApiError as error:
             logger.error(f"StorPool API error {error.name}: {error.desc}")
             if error.name == "insufficientResources":
@@ -327,23 +330,6 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             logger.error("Volume %s isn't attached", request.volume_id)
 
         return csi_pb2.ControllerUnpublishVolumeResponse()
-
-    def _get_attachment_for_volume(self, volume_name):
-        return next(
-            attachment
-            for attachment in self._sp_api.attachmentsList()
-            if attachment.volume == volume_name
-        )
-
-    @staticmethod
-    def _construct_volume_create_response(volume_info):
-        response = csi_pb2.CreateVolumeResponse()
-
-        if volume_info is not None:
-            response.volume.volume_id = volume_info.globalId
-            response.volume.capacity_bytes = volume_info.size
-
-        return response
 
     @staticmethod
     def _determine_volume_size(capacity_range):
