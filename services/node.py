@@ -54,13 +54,12 @@ def volume_get_fs(volume_name: str) -> str:
     """
     Returns the filesystem of a volume
     """
-    result = subprocess.run(
-        ["blkid", "-o", "value", volume_get_real_path(volume_name)],
+    return subprocess.run(
+        ["blkid", "-o", "value", "-s", "TYPE", volume_get_real_path(volume_name)],
         check=False,
         capture_output=True,
         encoding="utf-8",
-    )
-    return result.stdout.split("\n")[1]
+    ).stdout.strip()
 
 
 def volume_is_mounted(volume_name: str) -> bool:
