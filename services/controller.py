@@ -120,7 +120,7 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         logger.info(f"Deleting volume {request.volume_id}")
 
         try:
-            self._sp_api.volumeDelete(request.volume_id)
+            self._sp_api.volumeDelete(f"~{request.volume_id}")
             logger.debug(f"Successfully deleted volume {request.volume_id}")
         except spapi.ApiError as error:
             logger.error(f"StorPool API error {error.name}: {error.desc}")
@@ -144,7 +144,7 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             raise InvalidArgument("Missing volume capabilities")
 
         try:
-            self._sp_api.volumeInfo(request.volume_id)
+            self._sp_api.volumeInfo(f"~{request.volume_id}")
         except spapi.ApiError as error:
             if error.name == "objectDoesNotExist":
                 logger.error(
@@ -207,7 +207,7 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         sp_node_id = utils.csi_node_id_to_sp_node_id(request.node_id)
 
         volume_reassign = {
-            "volume": request.volume_id,
+            "volume": f"~{request.volume_id}",
             "rw": [sp_node_id],
             "detach": "all"
         }
@@ -247,7 +247,7 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
 
         logger.info(f"Unpublishing volume {request.volume_id}")
 
-        volume_reassign = {"volume": request.volume_id}
+        volume_reassign = {"volume": f"~{request.volume_id}"}
 
         if request.node_id:
             volume_reassign["detach"] = [
