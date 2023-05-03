@@ -89,6 +89,16 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             f"Provisioning volume {request.name} (template: {request.parameters['template']}, size: {volume_size})",
         )
 
+        for requested_capability in request.volume_capabilities:
+            if requested_capability.WhichOneof("access_type") == "mount":
+                if (requested_capability.access_mode.mode
+                        != requested_capability.AccessMode.SINGLE_NODE_WRITER
+                        and requested_capability.access_mode.mode
+                        != requested_capability.AccessMode.SINGLE_NODE_READER_ONLY):
+                    raise InvalidArgument()
+            else:
+                raise InvalidArgument()
+
         try:
             volume_create_result = self._sp_api.volumeCreate(
                 {
@@ -165,10 +175,10 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 logger.debug("Volume %s is of type mount.", request.volume_id)
                 confirmed_capability.mount.SetInParent()
                 if (
-                    requested_capability.access_mode.mode
-                    == confirmed_capability.AccessMode.SINGLE_NODE_WRITER
-                    or requested_capability.access_mode.mode
-                    == confirmed_capability.AccessMode.SINGLE_NODE_READER_ONLY
+                        requested_capability.access_mode.mode
+                        == confirmed_capability.AccessMode.SINGLE_NODE_WRITER
+                        or requested_capability.access_mode.mode
+                        == confirmed_capability.AccessMode.SINGLE_NODE_READER_ONLY
                 ):
                     confirmed_capability.access_mode.mode = (
                         requested_capability.access_mode.mode
