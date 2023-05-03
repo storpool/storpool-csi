@@ -2,6 +2,8 @@
 This module contains various utility functions
 """
 
+import re
+
 
 def csi_node_id_to_sp_node_id(csi_node_id: str) -> int:
     """
@@ -12,6 +14,10 @@ def csi_node_id_to_sp_node_id(csi_node_id: str) -> int:
     :rtype: int
     """
     return int(csi_node_id.split(".").pop())
+
+
+def csi_node_id_to_sp_cluster_id(csi_node_id: str) -> str:
+    return re.match(r"^[a-z0-9]+\.[a-z0-9]+", csi_node_id).group(0)
 
 
 def get_mounted_devices() -> list[dict]:

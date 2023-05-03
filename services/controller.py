@@ -223,7 +223,8 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         }
 
         try:
-            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
+            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]},
+                                             clusterName=f"~{utils.csi_node_id_to_sp_cluster_id(request.node_id)}")
         except spapi.ApiError as error:
             logger.error(f"StorPool API error {error.name}: {error.desc}")
             if error.name == "objectDoesNotExist":
@@ -274,7 +275,8 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 "Detaching volume %s from all nodes", request.volume_id
             )
         try:
-            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]})
+            self._sp_api.volumesReassignWait({"reassign": [volume_reassign]},
+                                             clusterName=f"~{utils.csi_node_id_to_sp_cluster_id(request.node_id)}")
         except spapi.ApiError as error:
             logger.error(f"StorPool API error {error.name}: {error.desc}")
             if error.name == "objectDoesNotExist":
@@ -292,4 +294,3 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             return max(capacity_range.required_bytes, capacity_range.limit_bytes)
         else:
             return constant.DEFAULT_VOLUME_SIZE
-
