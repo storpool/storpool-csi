@@ -102,6 +102,30 @@ service Controller {
     }
 }
 
+service GroupController {
+  option (alpha_service) = true;
+
+  rpc GroupControllerGetCapabilities (
+        GroupControllerGetCapabilitiesRequest)
+    returns (GroupControllerGetCapabilitiesResponse) {}
+
+  rpc CreateVolumeGroupSnapshot(CreateVolumeGroupSnapshotRequest)
+    returns (CreateVolumeGroupSnapshotResponse) {
+        option (alpha_method) = true;
+    }
+
+  rpc DeleteVolumeGroupSnapshot(DeleteVolumeGroupSnapshotRequest)
+    returns (DeleteVolumeGroupSnapshotResponse) {
+        option (alpha_method) = true;
+    }
+
+  rpc GetVolumeGroupSnapshot(
+        GetVolumeGroupSnapshotRequest)
+    returns (GetVolumeGroupSnapshotResponse) {
+        option (alpha_method) = true;
+    }
+}
+
 service Node {
   rpc NodeStageVolume (NodeStageVolumeRequest)
     returns (NodeStageVolumeResponse) {}
@@ -181,6 +205,15 @@ message PluginCapability {
       // returned by NodeGetInfo to ensure that a given volume is
       // accessible from a given node when scheduling workloads.
       VOLUME_ACCESSIBILITY_CONSTRAINTS = 2;
+
+      // GROUP_CONTROLLER_SERVICE indicates that the Plugin provides
+      // RPCs for operating on groups of volumes. Plugins MAY provide
+      // this capability.
+      // The presence of this capability determines whether the CO will
+      // attempt to invoke the REQUIRED GroupController service RPCs, as
+      // well as specific RPCs as indicated by
+      // GroupControllerGetCapabilities.
+      GROUP_CONTROLLER_SERVICE = 3 [(alpha_enum_value) = true];
     }
     Type type = 1;
   }
@@ -395,6 +428,19 @@ message VolumeCapability {
     // to untrusted entities. The total size of this repeated field
     // SHALL NOT exceed 4 KiB.
     repeated string mount_flags = 2;
+
+    // If SP has VOLUME_MOUNT_GROUP node capability and CO provides
+    // this field then SP MUST ensure that the volume_mount_group
+    // parameter is passed as the group identifier to the underlying
+    // operating system mount system call, with the understanding
+    // that the set of available mount call parameters and/or
+    // mount implementations may vary across operating systems.
+    // Additionally, new file and/or directory entries written to
+    // the underlying filesystem SHOULD be permission-labeled in such a
+    // manner, unless otherwise modified by a workload, that they are
+    // both readable and writable by said mount group identifier.
+    // This is an OPTIONAL field.
+    string volume_mount_group = 3;
   }
 
   // Specify how a volume can be accessed.
@@ -420,6 +466,18 @@ message VolumeCapability {
       // Can be published as read/write at multiple nodes
       // simultaneously.
       MULTI_NODE_MULTI_WRITER = 5;
+
+      // Can only be published once as read/write at a single workload
+      // on a single node, at any given time. SHOULD be used instead of
+      // SINGLE_NODE_WRITER for COs using the experimental
+      // SINGLE_NODE_MULTI_WRITER capability.
+      SINGLE_NODE_SINGLE_WRITER = 6 [(alpha_enum_value) = true];
+
+      // Can be published as read/write at multiple workloads on a
+      // single node simultaneously. SHOULD be used instead of
+      // SINGLE_NODE_WRITER for COs using the experimental
+      // SINGLE_NODE_MULTI_WRITER capability.
+      SINGLE_NODE_MULTI_WRITER = 7 [(alpha_enum_value) = true];
     }
 
     // This field is REQUIRED.
@@ -607,7 +665,7 @@ message TopologyRequirement {
   //   {"region": "R1", "zone": "Z3"}
   // preferred =
   //   {"region": "R1", "zone": "Z3"}
-  // then the the SP SHOULD first attempt to make the provisioned volume
+  // then the SP SHOULD first attempt to make the provisioned volume
   // available from "zone" "Z3" in the "region" "R1" and fall back to
   // "zone" "Z2" in the "region" "R1" if that is not possible.
   //
@@ -621,7 +679,7 @@ message TopologyRequirement {
   // preferred =
   //   {"region": "R1", "zone": "Z4"},
   //   {"region": "R1", "zone": "Z2"}
-  // then the the SP SHOULD first attempt to make the provisioned volume
+  // then the SP SHOULD first attempt to make the provisioned volume
   // accessible from "zone" "Z4" in the "region" "R1" and fall back to
   // "zone" "Z2" in the "region" "R1" if that is not possible. If that
   // is not possible, the SP may choose between either the "zone"
@@ -640,7 +698,7 @@ message TopologyRequirement {
   // preferred =
   //   {"region": "R1", "zone": "Z5"},
   //   {"region": "R1", "zone": "Z3"}
-  // then the the SP SHOULD first attempt to make the provisioned volume
+  // then the SP SHOULD first attempt to make the provisioned volume
   // accessible from the combination of the two "zones" "Z5" and "Z3" in
   // the "region" "R1". If that's not possible, it should fall back to
   // a combination of "Z5" and other possibilities from the list of
@@ -897,7 +955,7 @@ message ControllerGetVolumeResponse {
     // A list of all the `node_id` of nodes that this volume is
     // controller published on.
     // This field is OPTIONAL.
-    // This field MUST be specified if the PUBLISH_UNPUBLISH_VOLUME
+    // This field MUST be specified if the LIST_VOLUMES_PUBLISHED_NODES
     // controller capability is supported.
     // published_node_ids MAY include nodes not published to or
     // reported by the SP. The CO MUST be resilient to that.
@@ -963,8 +1021,7 @@ message GetCapacityResponse {
   // a maximum size for individual volumes and leave it unset
   // otherwise. COs MAY use it to make decision about
   // where to create volumes.
-  google.protobuf.Int64Value maximum_volume_size = 2
-    [(alpha_field) = true];
+  google.protobuf.Int64Value maximum_volume_size = 2;
 
   // The smallest size that may be used in a
   // CreateVolumeRequest.capacity_range.limit_bytes field
@@ -1024,7 +1081,9 @@ message ControllerServiceCapability {
       EXPAND_VOLUME = 9;
 
       // Indicates the SP supports the
-      // ListVolumesResponse.entry.published_nodes field
+      // ListVolumesResponse.entry.published_node_ids field and the
+      // ControllerGetVolumeResponse.published_node_ids field.
+      // The SP MUST also support PUBLISH_UNPUBLISH_VOLUME.
       LIST_VOLUMES_PUBLISHED_NODES = 10;
 
       // Indicates that the Controller service can report volume
@@ -1044,6 +1103,16 @@ message ControllerServiceCapability {
       // This enables COs to, for example, fetch per volume
       // condition after a volume is provisioned.
       GET_VOLUME = 12 [(alpha_enum_value) = true];
+
+      // Indicates the SP supports the SINGLE_NODE_SINGLE_WRITER and/or
+      // SINGLE_NODE_MULTI_WRITER access modes.
+      // These access modes are intended to replace the
+      // SINGLE_NODE_WRITER access mode to clarify the number of writers
+      // for a volume on a single node. Plugins MUST accept and allow
+      // use of the SINGLE_NODE_WRITER access mode when either
+      // SINGLE_NODE_SINGLE_WRITER and/or SINGLE_NODE_MULTI_WRITER are
+      // supported, in order to permit older COs to continue working.
+      SINGLE_NODE_MULTI_WRITER = 13 [(alpha_enum_value) = true];
     }
 
     Type type = 1;
@@ -1127,6 +1196,21 @@ message Snapshot {
   // `volume_content_source` in a `CreateVolumeRequest`. The default
   // value is false. This field is REQUIRED.
   bool ready_to_use = 5;
+
+  // The ID of the volume group snapshot that this snapshot is part of.
+  // It uniquely identifies the group snapshot on the storage system.
+  // This field is OPTIONAL.
+  // If this snapshot is a member of a volume group snapshot, and it
+  // MUST NOT be deleted as a stand alone snapshot, then the SP
+  // MUST provide the ID of the volume group snapshot in this field.
+  // If provided, CO MUST use this field in subsequent volume group
+  // snapshot operations to indicate that this snapshot is part of the
+  // specified group snapshot.
+  // If not provided, CO SHALL treat the snapshot as independent,
+  // and SP SHALL allow it to be deleted separately.
+  // If this message is inside a VolumeGroupSnapshot message, the value
+  // MUST be the same as the group_snapshot_id in that message.
+  string group_snapshot_id = 6 [(alpha_field) = true];
 }
 message DeleteSnapshotRequest {
   // The ID of the snapshot to be deleted.
@@ -1476,6 +1560,22 @@ message NodeServiceCapability {
       // Note that, for alpha, `VolumeCondition` is intended to be
       // informative for humans only, not for automation.
       VOLUME_CONDITION = 4 [(alpha_enum_value) = true];
+
+      // Indicates the SP supports the SINGLE_NODE_SINGLE_WRITER and/or
+      // SINGLE_NODE_MULTI_WRITER access modes.
+      // These access modes are intended to replace the
+      // SINGLE_NODE_WRITER access mode to clarify the number of writers
+      // for a volume on a single node. Plugins MUST accept and allow
+      // use of the SINGLE_NODE_WRITER access mode (subject to the
+      // processing rules for NodePublishVolume), when either
+      // SINGLE_NODE_SINGLE_WRITER and/or SINGLE_NODE_MULTI_WRITER are
+      // supported, in order to permit older COs to continue working.
+      SINGLE_NODE_MULTI_WRITER = 5 [(alpha_enum_value) = true];
+
+      // Indicates that Node service supports mounting volumes
+      // with provided volume group identifier during node stage
+      // or node publish RPC calls.
+      VOLUME_MOUNT_GROUP = 6;
     }
 
     Type type = 1;
@@ -1574,11 +1674,183 @@ message NodeExpandVolumeRequest {
   // Secrets required by plugin to complete node expand volume request.
   // This field is OPTIONAL. Refer to the `Secrets Requirements`
   // section on how to use this field.
-  map<string, string> secrets = 6 
+  map<string, string> secrets = 6
     [(csi_secret) = true, (alpha_field) = true];
 }
 
 message NodeExpandVolumeResponse {
   // The capacity of the volume in bytes. This field is OPTIONAL.
   int64 capacity_bytes = 1;
+}
+message GroupControllerGetCapabilitiesRequest {
+  option (alpha_message) = true;
+
+  // Intentionally empty.
+}
+
+message GroupControllerGetCapabilitiesResponse {
+  option (alpha_message) = true;
+
+  // All the capabilities that the group controller service supports.
+  // This field is OPTIONAL.
+  repeated GroupControllerServiceCapability capabilities = 1;
+}
+
+// Specifies a capability of the group controller service.
+message GroupControllerServiceCapability {
+  option (alpha_message) = true;
+
+  message RPC {
+    enum Type {
+      UNKNOWN = 0;
+
+      // Indicates that the group controller plugin supports
+      // creating, deleting, and getting details of a volume
+      // group snapshot.
+      CREATE_DELETE_GET_VOLUME_GROUP_SNAPSHOT = 1
+      [(alpha_enum_value) = true];
+    }
+
+    Type type = 1;
+  }
+
+  oneof type {
+    // RPC that the controller supports.
+    RPC rpc = 1;
+  }
+}
+message CreateVolumeGroupSnapshotRequest {
+  option (alpha_message) = true;
+
+  // The suggested name for the group snapshot. This field is REQUIRED
+  // for idempotency.
+  // Any Unicode string that conforms to the length limit is allowed
+  // except those containing the following banned characters:
+  // U+0000-U+0008, U+000B, U+000C, U+000E-U+001F, U+007F-U+009F.
+  // (These are control characters other than commonly used whitespace.)
+  string name = 1;
+
+  // volume IDs of the source volumes to be snapshotted together.
+  // This field is REQUIRED.
+  repeated string source_volume_ids = 2;
+
+  // Secrets required by plugin to complete
+  // ControllerCreateVolumeGroupSnapshot request.
+  // This field is OPTIONAL. Refer to the `Secrets Requirements`
+  // section on how to use this field.
+  // The secrets provided in this field SHOULD be the same for 
+  // all group snapshot operations on the same group snapshot. 
+  map<string, string> secrets = 3 [(csi_secret) = true];
+
+  // Plugin specific parameters passed in as opaque key-value pairs.
+  // This field is OPTIONAL. The Plugin is responsible for parsing and
+  // validating these parameters. COs will treat these as opaque.
+  map<string, string> parameters = 4;
+}
+
+message CreateVolumeGroupSnapshotResponse {
+  option (alpha_message) = true;
+
+  // Contains all attributes of the newly created group snapshot.
+  // This field is REQUIRED.
+  VolumeGroupSnapshot group_snapshot = 1;
+}
+
+message VolumeGroupSnapshot {
+  option (alpha_message) = true;
+
+  // The identifier for this group snapshot, generated by the plugin.
+  // This field MUST contain enough information to uniquely identify
+  // this specific snapshot vs all other group snapshots supported by
+  // this plugin.
+  // This field SHALL be used by the CO in subsequent calls to refer to
+  // this group snapshot.
+  // The SP is NOT responsible for global uniqueness of
+  // group_snapshot_id across multiple SPs.
+  // This field is REQUIRED.
+  string group_snapshot_id = 1;
+
+  // A list of snapshots belonging to this group.
+  // This field is REQUIRED.
+  repeated Snapshot snapshots = 2;
+
+  // Timestamp of when the volume group snapshot was taken.
+  // This field is REQUIRED.
+  .google.protobuf.Timestamp creation_time = 3;
+
+  // Indicates if all individual snapshots in the group snapshot
+  // are ready to use as a `volume_content_source` in a
+  // `CreateVolumeRequest`. The default value is false.
+  // If any snapshot in the list of snapshots in this message have
+  // ready_to_use set to false, the SP MUST set this field to false.
+  // If all of the snapshots in the list of snapshots in this message
+  // have ready_to_use set to true, the SP SHOULD set this field to
+  // true.
+  // This field is REQUIRED.
+  bool ready_to_use = 4;
+}
+message DeleteVolumeGroupSnapshotRequest {
+  option (alpha_message) = true;
+
+  // The ID of the group snapshot to be deleted.
+  // This field is REQUIRED.
+  string group_snapshot_id = 1;
+
+  // A list of snapshot IDs that are part of this group snapshot.
+  // If SP does not need to rely on this field to delete the snapshots
+  // in the group, it SHOULD check this field and report an error
+  // if it has the ability to detect a mismatch.
+  // Some SPs require this list to delete the snapshots in the group.
+  // If SP needs to use this field to delete the snapshots in the
+  // group, it MUST report an error if it has the ability to detect
+  // a mismatch.
+  // This field is REQUIRED.
+  repeated string snapshot_ids = 2;
+
+  // Secrets required by plugin to complete group snapshot deletion
+  // request.
+  // This field is OPTIONAL. Refer to the `Secrets Requirements`
+  // section on how to use this field.
+  // The secrets provided in this field SHOULD be the same for
+  // all group snapshot operations on the same group snapshot.
+  map<string, string> secrets = 3 [(csi_secret) = true];
+}
+
+message DeleteVolumeGroupSnapshotResponse {
+  // Intentionally empty.
+  option (alpha_message) = true;
+}
+message GetVolumeGroupSnapshotRequest {
+  option (alpha_message) = true;
+
+  // The ID of the group snapshot to fetch current group snapshot
+  // information for.
+  // This field is REQUIRED.
+  string group_snapshot_id = 1;
+
+  // A list of snapshot IDs that are part of this group snapshot.
+  // If SP does not need to rely on this field to get the snapshots
+  // in the group, it SHOULD check this field and report an error
+  // if it has the ability to detect a mismatch.
+  // Some SPs require this list to get the snapshots in the group.
+  // If SP needs to use this field to get the snapshots in the
+  // group, it MUST report an error if it has the ability to detect
+  // a mismatch.
+  // This field is REQUIRED.
+  repeated string snapshot_ids = 2;
+
+  // Secrets required by plugin to complete
+  // GetVolumeGroupSnapshot request.
+  // This field is OPTIONAL. Refer to the `Secrets Requirements`
+  // section on how to use this field.
+  // The secrets provided in this field SHOULD be the same for
+  // all group snapshot operations on the same group snapshot.
+  map<string, string> secrets = 3 [(csi_secret) = true];
+}
+
+message GetVolumeGroupSnapshotResponse {
+  option (alpha_message) = true;
+
+  // This field is REQUIRED
+  VolumeGroupSnapshot group_snapshot = 1;
 }
