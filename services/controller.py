@@ -50,7 +50,7 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 sp_api_token,
             )
             self._sp_api = spapi.Api(
-                host=url.hostname, port=url.port, auth=sp_api_token
+                host=url.hostname, port=url.port, auth=sp_api_token, multiCluster=True,
             )
 
     def ControllerGetCapabilities(self, request, context):
