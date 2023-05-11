@@ -95,9 +95,9 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                         != requested_capability.AccessMode.SINGLE_NODE_WRITER
                         and requested_capability.access_mode.mode
                         != requested_capability.AccessMode.SINGLE_NODE_READER_ONLY):
-                    raise InvalidArgument()
+                    raise InvalidArgument(f"Requested unsupported access mode: {requested_capability.access_mode.mode}")
             else:
-                raise InvalidArgument()
+                raise InvalidArgument("Requested unsupported block access mode")
 
         try:
             volume_create_result = self._sp_api.volumeCreate(
