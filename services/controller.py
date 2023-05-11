@@ -290,7 +290,8 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
 
     @staticmethod
     def _determine_volume_size(capacity_range):
-        if capacity_range.required_bytes > 0 and capacity_range.limit_bytes > 0:
+        logger.debug(f"Required bytes: {capacity_range.required_bytes}, limit bytes: {capacity_range.limit_bytes}")
+        if capacity_range.required_bytes > 0 or capacity_range.limit_bytes > 0:
             return max(capacity_range.required_bytes, capacity_range.limit_bytes)
         else:
             return constant.DEFAULT_VOLUME_SIZE
