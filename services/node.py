@@ -47,10 +47,10 @@ def volume_is_formatted(volume_name: str) -> bool:
     Checks whether a StorPool volume is formatted
     """
     return (
-        subprocess.run(
-            ["blkid", volume_get_real_path(volume_name)], check=False
-        ).returncode
-        == 0
+            subprocess.run(
+                ["blkid", volume_get_real_path(volume_name)], check=False
+            ).returncode
+            == 0
     )
 
 
@@ -72,14 +72,14 @@ def volume_is_mounted(volume_name: str) -> bool:
     """
     system_mounts = utils.get_mounted_devices()
     return (
-        len(
-            [
-                mount
-                for mount in system_mounts
-                if mount["device"] == volume_get_real_path(volume_name)
-            ]
-        )
-        > 0
+            len(
+                [
+                    mount
+                    for mount in system_mounts
+                    if mount["device"] == volume_get_real_path(volume_name)
+                ]
+            )
+            > 0
     )
 
 
@@ -123,9 +123,9 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
         self._config = spconfig.SPConfig(os.environ.get("SP_NODE_NAME", None))
         self._sp_api = spapi.Api.fromConfig()
         self._node_id = (
-            str(self._config["SP_CLUSTER_ID"]).lower()
-            + "."
-            + str(self._config["SP_OURID"])
+                str(self._config["SP_CLUSTER_ID"]).lower()
+                + "."
+                + str(self._config["SP_OURID"])
         )
 
     def NodeGetInfo(self, request, context):
@@ -286,8 +286,8 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                     )
 
                 if (
-                    request.volume_capability.mount.mount_flags
-                    and volume_mount_info["options"] != mount_options
+                        request.volume_capability.mount.mount_flags
+                        and volume_mount_info["options"] != mount_options
                 ):
                     logger.error(
                         """Volume %s is already mounted with %s""",
