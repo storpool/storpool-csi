@@ -71,6 +71,11 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             publish_readonly_cap.RPC.PUBLISH_READONLY
         )
 
+        expand_volume_cap = response.capabilities.add()
+        expand_volume_cap.rpc.type = (
+            publish_readonly_cap.RPC.EXPAND_VOLUME
+        )
+
         return response
 
     def CreateVolume(self, request, context):
@@ -287,6 +292,41 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 raise Internal(error.desc)
 
         return csi_pb2.ControllerUnpublishVolumeResponse()
+
+    def ControllerExpandVolume(self, request, context):
+        """
+        Handles requests to expand a volume
+        :param request:
+        :param context:
+        :return:
+        """
+
+        if not request.volume_id:
+            raise InvalidArgument("Missing volume ID")
+
+        if not request.capacity_range:
+            raise InvalidArgument("Missing new volume capacity range")
+
+        try:
+            new_volume_size = self._determine_volume_size(request.capacity_range)
+            self._sp_api.volumeUpdate(f"~{request.volume_id}",
+                                      {
+                                          "size": new_volume_size
+                                      })
+
+            expand_volume_response = csi_pb2.ControllerExpandVolumeResponse()
+            expand_volume_response.capacity_bytes = new_volume_size
+            expand_volume_response.node_expansion_required = True
+
+            return expand_volume_response
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "insufficientResources":
+                raise OutOfRange(error.desc)
+            elif error.name == "objectDoesNotExist":
+                raise NotFound(error.desc)
+            else:
+                raise Internal(error.desc)
 
     @staticmethod
     def _determine_volume_size(capacity_range):

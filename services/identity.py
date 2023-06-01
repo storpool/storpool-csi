@@ -41,6 +41,11 @@ class IdentityServicer(csi_pb2_grpc.IdentityServicer):
             controller_capability.Service.CONTROLLER_SERVICE
         )
 
+        volume_expansion_capability = response.capabilities.add()
+        volume_expansion_capability.volume_expansion.type = (
+            volume_expansion_capability.VolumeExpansion.ONLINE
+        )
+
         return response
 
     def Probe(self, request, context):

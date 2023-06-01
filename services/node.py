@@ -21,6 +21,10 @@ from pb import csi_pb2_grpc
 
 import utils
 
+RESIZE_TOOL_MAP = {
+    "ext4": "/sbin/resize2fs"
+}
+
 logger = logging.getLogger("NodeService")
 
 
@@ -135,6 +139,9 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
 
         stage_unstage_cap = response.capabilities.add()
         stage_unstage_cap.rpc.type = stage_unstage_cap.RPC.STAGE_UNSTAGE_VOLUME
+
+        volume_expand_cap = response.capabilities.add()
+        volume_expand_cap.rpc.type = volume_expand_cap.RPC.EXPAND_VOLUME
 
         return response
 
@@ -463,3 +470,47 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                 )
 
         return csi_pb2.NodeUnpublishVolumeResponse()
+
+    def NodeExpandVolume(self, request, context):
+        """
+        Handles FS resize accordingly
+        :param request:
+        :param context:
+        :return:
+        """
+
+        if not request.volume_id:
+            raise InvalidArgument("Missing volume id.")
+
+        logger.info(f"Extending volume {request.volume_id} file system")
+
+        volume_fs = volume_get_fs(request.volume_id)
+
+        logger.debug(f"Detected volume {request} file system type: {volume_fs}")
+
+        try:
+            extend_fs_tool = RESIZE_TOOL_MAP[volume_fs]
+
+            logger.debug(f"Using {extend_fs_tool} to extend the file system")
+
+            extend_command = subprocess.run([
+                extend_fs_tool,
+                volume_get_real_path(request.volume_id)
+            ],
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+            )
+
+            if extend_command.returncode != 0:
+                error_message = f"Extending the file system for volume {request.volume_id} failed with: {extend_command.stderr}"
+                logger.error(error_message)
+                raise Internal(error_message)
+
+            logger.debug(f"Resize tool output: {extend_command.stdout}")
+
+            expand_volume_response = csi_pb2.NodeExpandVolumeResponse()
+            return expand_volume_response
+        except KeyError:
+            logger.error(f"CO requested to extend an unsupported file system: {volume_fs}")
+            raise Internal(f"Unsupported file system: {volume_fs}")
