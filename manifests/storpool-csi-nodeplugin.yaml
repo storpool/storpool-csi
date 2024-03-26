@@ -17,7 +17,7 @@ spec:
         kubernetes.io/os: linux
       containers:
         - name: storpool-csi-plugin
-          image: netcho/storpool-csi:0.0.2-3
+          image: cts.storpool.com/storpool-csi/release:1.0.0
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
@@ -59,7 +59,7 @@ spec:
               mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
         - name: node-driver-registrar
-          image: k8s.gcr.io/sig-storage/csi-node-driver-registrar:v2.1.0
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.0
           args:
             - "--csi-address=/csi/csi.sock"
             - "--kubelet-registration-path=/var/lib/kubelet/plugins/csi.storpool.com/csi.sock"
@@ -69,10 +69,9 @@ spec:
             - name: registration-dir
               mountPath: /registration
         - name: liveness-probe
-          image: k8s.gcr.io/sig-storage/livenessprobe:v2.2.0
+          image: k8s.gcr.io/sig-storage/livenessprobe:v2.11.0
           args:
             - --csi-address=/csi/csi.sock
-            - --v=4
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

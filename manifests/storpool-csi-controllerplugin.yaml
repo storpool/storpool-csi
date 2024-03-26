@@ -15,7 +15,7 @@ spec:
       serviceAccountName: storpool-csi-controller-sa
       containers:
         - name: storpool-csi-plugin
-          image: netcho/storpool-csi:0.0.2-3
+          image: cts.storpool.com/storpool-csi/release:1.0.0
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
@@ -46,11 +46,17 @@ spec:
             - name: socket-dir
               mountPath: /csi
         - name: csi-provisioner
-          image: k8s.gcr.io/sig-storage/csi-provisioner:v2.2.0
+          image: registry.k8s.io/sig-storage/csi-provisioner:v3.6.0
           args:
             - "--csi-address=$(ADDRESS)"
             - "--default-fstype=ext4"
             - "--extra-create-metadata"
+            - '--leader-election'
+            - '--http-endpoint=:8080'
+          ports:
+            - name: http-endpoint
+              containerPort: 8080
+              protocol: TCP
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -58,10 +64,26 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: http-endpoint
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 1
         - name: csi-attacher
-          image: k8s.gcr.io/sig-storage/csi-attacher:v3.1.0
+          image: registry.k8s.io/sig-storage/csi-attacher:v4.4.0
           args:
             - "--csi-address=$(ADDRESS)"
+            - '--leader-election'
+            - '--http-endpoint=:8081'
+          ports:
+            - name: http-endpoint
+              containerPort: 8081
+              protocol: TCP
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -69,8 +91,44 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: http-endpoint
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 1
+        - name: csi-resizer
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.8.0
+          args:
+            - '--csi-address=$(ADDRESS)'
+            - '--leader-election'
+            - '--http-endpoint=:8082'
+          ports:
+            - name: http-endpoint
+              containerPort: 8082
+              protocol: TCP
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          livenessProbe:
+            httpGet:
+              path: /healthz/leader-election
+              port: http-endpoint
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 10
+            periodSeconds: 20
+            successThreshold: 1
+            failureThreshold: 1
         - name: liveness-probe
-          image: k8s.gcr.io/sig-storage/livenessprobe:v2.2.0
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.11.0
           args:
             - "--csi-address=$(ADDRESS)"
           env:
