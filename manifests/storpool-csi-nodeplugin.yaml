@@ -17,7 +17,7 @@ spec:
         kubernetes.io/os: linux
       containers:
         - name: storpool-csi-plugin
-          image: cts.storpool.com/storpool-csi/release:1.0.0
+          image: cts.storpool.com/storpool-csi/release:1.1.0
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock

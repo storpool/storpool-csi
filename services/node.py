@@ -2,8 +2,10 @@
 Bla-bla
 """
 import distutils.util
+import grp
 import logging
 import os.path
+import stat
 import subprocess
 
 from pathlib import Path
@@ -306,7 +308,7 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
             raise InvalidArgument("Missing volume id")
 
         if not request.staging_target_path:
-            raise InvalidArgument("Missing stating target path")
+            raise InvalidArgument("Missing staging target path")
 
         if not volume_is_attached(request.volume_id):
             raise NotFound(
@@ -361,6 +363,15 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
         target_path = Path(request.target_path)
 
         if not target_path.exists():
+            if request.volume_capability.WhichOneof("access_type") == "block":
+                logger.debug("The requested PV is a raw block device, creating a device file via mknod")
+                device_number = os.stat(f"/dev/storpool-byid/{request.volume_id}").st_rdev
+                logger.debug(f"Obtained device number {device_number}")
+                os.mknod(path=target_path, mode=stat.S_IFBLK | 0o660, device=device_number)
+                logger.debug("Changing ownership of device file")
+                os.chown(path=target_path, uid=0, gid=grp.getgrnam("disk").gr_gid)
+                return csi_pb2.NodePublishVolumeResponse()
+
             logger.debug(
                 "Target path %s doesn't exist, creating it.",
                 request.target_path,
@@ -468,6 +479,10 @@ class NodeServicer(csi_pb2_grpc.NodeServicer):
                     f"""The following error occurred while removing
                      the target path {request.volume_id}: {remove_target_path_command.stderr}"""
                 )
+
+        if target_path.is_block_device():
+            logger.debug("Volume target path is a block device file, removing")
+            target_path.unlink(missing_ok=True)
 
         return csi_pb2.NodeUnpublishVolumeResponse()
 
