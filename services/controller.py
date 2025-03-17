@@ -101,8 +101,6 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                         and requested_capability.access_mode.mode
                         != requested_capability.AccessMode.SINGLE_NODE_READER_ONLY):
                     raise InvalidArgument(f"Requested unsupported access mode: {requested_capability.access_mode.mode}")
-            else:
-                raise InvalidArgument("Requested unsupported block access mode")
 
         try:
             volume_create_result = self._sp_api.volumeCreate(
@@ -219,12 +217,11 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 f"Node {request.node_id} is not a StorPool CSI node"
             )
 
-        sp_node_id = utils.csi_node_id_to_sp_node_id(request.node_id)
+        new_client_id = utils.csi_node_id_to_sp_node_id(request.node_id)
 
         volume_reassign = {
             "volume": f"~{request.volume_id}",
-            "rw": [sp_node_id],
-            "detach": "all"
+            "rw": [new_client_id]
         }
 
         try:
@@ -246,10 +243,6 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                     error_message = f"No more volumes can be attached to node {request.node_id}"
                     logger.error(error_message)
                     raise ResourceExhausted(error_message)
-            elif error.name == "busy":
-                error_message = f"StorPool volume {request.volume_id} is already attach to another node."
-                logger.error(error_message)
-                raise FailedPrecondition(error_message)
             else:
                 raise Internal(error.desc)
 
@@ -288,6 +281,10 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                 error_message = f"StorPool volume {request.volume_id} does not exist"
                 logger.error(error_message)
                 raise NotFound(error_message)
+            elif error.name == "busy":
+                error_message = f"StorPool volume {request.volume_id} is still open by a process, cannot detach."
+                logger.error(error_message)
+                raise FailedPrecondition(error_message)
             else:
                 raise Internal(error.desc)
 
