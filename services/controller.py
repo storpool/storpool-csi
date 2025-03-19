@@ -76,6 +76,11 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             publish_readonly_cap.RPC.EXPAND_VOLUME
         )
 
+        clone_volume_cap = response.capabilities.add()
+        clone_volume_cap.rpc.type = (
+            clone_volume_cap.RPC.CLONE_VOLUME
+        )
+
         return response
 
     def CreateVolume(self, request, context):
@@ -88,12 +93,6 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
         if request.parameters["template"] is None:
             raise InvalidArgument("Missing volume template name")
 
-        volume_size = self._determine_volume_size(request.capacity_range)
-
-        logger.info(
-            f"Provisioning volume {request.name} (template: {request.parameters['template']}, size: {volume_size})",
-        )
-
         for requested_capability in request.volume_capabilities:
             if requested_capability.WhichOneof("access_type") == "mount":
                 if (requested_capability.access_mode.mode
@@ -102,24 +101,50 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
                         != requested_capability.AccessMode.SINGLE_NODE_READER_ONLY):
                     raise InvalidArgument(f"Requested unsupported access mode: {requested_capability.access_mode.mode}")
 
-        try:
-            volume_create_result = self._sp_api.volumeCreate(
-                {
-                    "template": request.parameters["template"],
-                    "size": volume_size,
-                    "tags": {"csi_name": request.name},
-                }
+        volume_size = self._determine_volume_size(request.capacity_range)
+
+        volume_create_request_body = {
+            "template": request.parameters["template"],
+            "size": volume_size,
+            "tags": {"csi_name": request.name},
+        }
+
+        response = csi_pb2.CreateVolumeResponse()
+        response.volume.capacity_bytes = volume_size
+
+        if request.volume_content_source.WhichOneof("type") == "volume":
+            source_volume_id = request.volume_content_source.volume.volume_id
+            logger.info(
+                f"Cloning volume {request.name} from {source_volume_id} "
+                f"(template: {request.parameters['template']}, size: {volume_size})",
             )
 
-            response = csi_pb2.CreateVolumeResponse()
+            volume_create_request_body["baseOn"] = f"~{source_volume_id}"
+            response.volume.content_source.volume.volume_id = source_volume_id
+        elif request.volume_content_source.WhichOneof("type") == "snapshot":
+            source_snapshot_id = request.volume_content_source.snapshot.snapshot_id
+            logger.info(
+                f"Creating volume {request.name} from snapshot {source_snapshot_id}"
+                f"(template: {request.parameters['template']}, size: {volume_size})",
+            )
+
+            volume_create_request_body["parent"] = f"~{source_snapshot_id}"
+            response.volume.content_source.snapshot.snapshot_id = source_snapshot_id
+        else:
+            logger.info(
+                f"Provisioning new volume {request.name} "
+                f"(template: {request.parameters['template']}, size: {volume_size})",
+            )
+
+        try:
+            volume_create_result = self._sp_api.volumeCreate(volume_create_request_body)
 
             response.volume.volume_id = str(volume_create_result.globalId)
-            response.volume.capacity_bytes = volume_size
 
             return response
         except spapi.ApiError as error:
             logger.error(f"StorPool API error {error.name}: {error.desc}")
-            if error.name == "insufficientResources":
+            if error.name == "insufficientResources" or error.name == "invalidParam":
                 raise OutOfRange(error.desc)
             elif error.name == "objectDoesNotExist":
                 raise InvalidArgument(error.desc)
