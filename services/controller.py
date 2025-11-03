@@ -81,6 +81,11 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             clone_volume_cap.RPC.CLONE_VOLUME
         )
 
+        modify_volume_cap = response.capabilities.add()
+        modify_volume_cap.rpc.type = (
+            modify_volume_cap.RPC.MODIFY_VOLUME
+        )
+
         return response
 
     def CreateVolume(self, request, context):
@@ -147,6 +152,58 @@ class ControllerServicer(csi_pb2_grpc.ControllerServicer):
             if error.name == "insufficientResources" or error.name == "invalidParam":
                 raise OutOfRange(error.desc)
             elif error.name == "objectDoesNotExist":
+                raise InvalidArgument(error.desc)
+            else:
+                raise Internal(error.desc)
+
+    def ControllerModifyVolume(self, request, context):
+        if not request.volume_id:
+            raise InvalidArgument("Missing volume ID")
+
+        if not request.mutable_parameters:
+            return csi_pb2.ControllerModifyVolumeResponse()
+
+        logger.info(
+            "Modifying volume %s with parameters: %r",
+            request.volume_id,
+            dict(request.mutable_parameters),
+        )
+
+        tags_update = {}
+        update_params = {}
+        
+        for key, value in request.mutable_parameters.items():
+            if key.startswith("tag."):
+                tag_key = key[4:]
+                if tag_key:
+                    tags_update[tag_key] = value
+            else:
+                update_params[key] = value
+        
+        if tags_update:
+            update_params["tags"] = tags_update
+
+        try:
+            self._sp_api.volumeUpdate(f"~{request.volume_id}", update_params)
+            logger.debug(
+                "Successfully updated volume %s with tags: %r",
+                request.volume_id,
+                update_params,
+            )
+            return csi_pb2.ControllerModifyVolumeResponse()
+        except spapi.ApiError as error:
+            logger.error(f"StorPool API error {error.name}: {error.desc}")
+            if error.name == "objectDoesNotExist":
+                logger.error(
+                    f"Tried updating volume {request.volume_id} but it doesn't exist."
+                )
+                raise NotFound(f"StorPool volume {request.volume_id} not found.")
+            elif error.name == "jsonError":
+                logger.error(
+                    f"Tried to update volume {request.volume_id} with invalid JSON or parameters: {request.mutable_parameters}"
+                )
+                raise FailedPrecondition(error.desc)
+            elif error.name == "invalidParam":
                 raise InvalidArgument(error.desc)
             else:
                 raise Internal(error.desc)
