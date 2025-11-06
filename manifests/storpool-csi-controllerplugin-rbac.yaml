@@ -43,7 +43,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: storpool-csi-controller-sa
-    namespace: default
+    namespace: kube-system
 roleRef:
   kind: Role
   name: external-attacher-cfg
